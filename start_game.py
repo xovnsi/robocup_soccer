@@ -14,11 +14,16 @@ def main():
     agents = []
 
     for i in range(args.players):
-        role = Role.STRIKER if i == 0 else Role.DEFAULT
+        if i == 0:
+            role = Role.GOALIE
+        else:
+            role = Role.STRIKER if i == 1 else Role.DEFAULT
         agents.append(Process(target=launch_agent, args=(TeamSide.LEFT, role)))
 
-        # You can add striker for enemy team too if you want:
-        role = Role.STRIKER if i == 0 else Role.DEFAULT
+        if i == 0:
+            role = Role.GOALIE
+        else:
+           role = Role.STRIKER if i == 1 else Role.DEFAULT
         agents.append(Process(target=launch_agent, args=(TeamSide.RIGHT, role)))
 
     for p in agents:
