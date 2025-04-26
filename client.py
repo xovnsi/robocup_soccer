@@ -79,6 +79,15 @@ class RCSSClient:
         self.socket.sendto(catch_msg.encode(), (self.server_host, self.server_port))
         return f"Próba złapania piłki w kierunku {direction}"
     
+    def kick(self, power, direction):
+        """Kick the ball with specified power and direction."""
+        if not self.is_connected:
+            return "Not connected to server"
+            
+        kick_msg = f"(kick {power} {direction})"
+        self.socket.sendto(kick_msg.encode(), (self.server_host, self.server_port))
+        return f"Kicked ball with power {power} and direction {direction}"
+        
     def disconnect(self):
         if self.socket:
             self.socket.close()
@@ -115,14 +124,17 @@ class RCSSClient:
                         direction = cmd.get("direction", 0)
                         result = self.catch(direction)
                         resp_queue.put({"status": "success", "message": result})
+                    elif cmd["action"] == "kick":
+                        power = cmd.get("power", 10)
+                        direction = cmd.get("direction", 0)
+                        result = self.kick(power, direction)
+                        resp_queue.put({"status": "success", "message": result})
                     elif cmd["action"] == "exit":
                         break
                 except multiprocessing.queues.Empty:
-                    pass  # Brak nowych komend
-                
-                # Tutaj można dodać odbieranie i przetwarzanie komunikatów z serwera
-                
-                time.sleep(0.01)  # Krótkie opóźnienie
+                    pass  
+                                
+                time.sleep(0.01)  
                 
         except Exception as e:
             resp_queue.put({"status": "error", "message": str(e)})

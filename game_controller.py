@@ -90,20 +90,27 @@ class GameController:
         print("Moving a player to center for kickoff...")
         if len(self.left_agents) > 1:
             _, cmd_q, resp_q, name = self.left_agents[1]  # First field player of left team
-            cmd_q.put({"action": "move", "position": (0, 0)})
+            print(f"Moving {name} to center...")
+            cmd_q.put({"action": "move", "position": (0, 1)})
+            response = resp_q.get(timeout=1)
+            print(f"{name}: {response['message']}")
+
+            # turn to face the ball (upwards)
+            cmd_q.put({"action": "turn", "moment": -90})
             response = resp_q.get(timeout=1)
             print(f"{name}: {response['message']}")
             
             # Make sure this player kicks the ball
             time.sleep(1)
-            cmd_q.put({"action": "dash", "power": 100, "direction": 0})
+            cmd_q.put({"action": "kick", "power": 50, "direction": 90})
+            print(f"{name} kicking the ball...")
             response = resp_q.get(timeout=1)
             print(f"{name}: {response['message']}")
             
             # Have this player kick again several times to ensure ball movement
             for _ in range(3):
                 time.sleep(0.5)
-                cmd_q.put({"action": "dash", "power": 100, "direction": 0})
+                cmd_q.put({"action": "kick", "power": 100, "direction": 0})
                 response = resp_q.get(timeout=1)
     
     def start_player_threads(self):
