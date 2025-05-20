@@ -3,9 +3,8 @@ import pygame
 from train import FootballSimulation, TeamAgent
 
 def main():
-    pygame.init()
-    screen = pygame.display.set_mode((800, 600))
-    sim = FootballSimulation(num_players_per_team=5)
+
+    sim = FootballSimulation(num_players_per_team=5, use_rendering=True)
 
     # Load trained model
     policy_net_a = TeamAgent(5, 4 + 4*5*2, 6).to(sim.device)
@@ -30,8 +29,8 @@ def main():
         sim.set_team_actions('A', action_a)
         
         sim.set_team_actions('B', action_b)
-        
-        sim.update()
+
+        print("actions set")
         sim.render()
 
     pygame.quit()
