@@ -37,10 +37,9 @@ def main():
         sim.set_team_actions('A', action_a)
         sim.set_team_actions('B', action_b)
 
-        sim.update()
+        sim.step(action_a, action_b)
         sim.render()
 
-    sim.close()  # or pygame.quit() if close() is not defined
 
 if __name__ == "__main__":
     main()

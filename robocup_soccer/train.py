@@ -112,6 +112,11 @@ class CriticNetwork(nn.Module):
         q_value = self.fc3(x)
         return q_value
 
+
+def close():
+    pygame.quit()
+
+
 class FootballSimulation:
     def __init__(self, num_players_per_team=5, use_rendering=False):
         # Initialize device (CPU/GPU)
@@ -765,4 +770,4 @@ def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_S
         print(f"Episode {episode+1}, Reward A: {total_reward_a:.2f}, Reward B: {total_reward_b:.2f}, Epsilon: {epsilon:.3f}")
     
 if __name__ == "__main__":
-    train_agents(num_episodes=100, max_steps_per_episode=600, batch_size=BATCH_SIZE, num_players=5, render_every=50)
+    train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_SIZE, num_players=5, render_every=50)
