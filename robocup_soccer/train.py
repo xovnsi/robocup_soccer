@@ -626,34 +626,6 @@ class FootballSimulation:
         return True
 
 
-def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_SIZE,
-                num_players=5, render_every=100):
-    """Train two team agents against each other"""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Create simulation environment
-    env = FootballSimulation(num_players_per_team=num_players, use_rendering=False)
-    
-    # Calculate state and action dimensions
-    state_dim = 4 + 4 * num_players * 2  # Ball (4) + players (4 per player)
-    action_dim_per_player = 6  # [dir_x, dir_y, kick, kick_power, kick_dir_x, kick_dir_y]
-    
-    # Create the networks
-    policy_net_a = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
-    target_net_a = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
-    target_net_a.load_state_dict(policy_net_a.state_dict())
-    
-    policy_net_b = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
-    target_net_b = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
-    target_net_b.load_state_dict(policy_net_b.state_dict())
-    
-    # Setup optimizers
-    optimizer_a = optim.Adam(policy_net_a.parameters(), lr=LR)
-    optimizer_b = optim.Adam(policy_net_b.parameters(), lr=LR)
-    
-    memory_a = ReplayMemory(MEMORY_SIZE)
-    memory_b = ReplayMemory(MEMORY_SIZE)
-
 def select_action(policy_net, state, noise_scale, device):
     policy_net.eval()
     with torch.no_grad():
@@ -785,10 +757,10 @@ def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_S
             print(f"Saved models at episode {episode + 1}")
     
         
-        if (episode + 1) % render_every == 0:
-            env.use_rendering = True
-            env.render()
-            env.use_rendering = False
+        # if (episode + 1) % render_every == 0:
+        #     env.use_rendering = True
+        #     env.render()
+        #     env.use_rendering = False
         
         print(f"Episode {episode+1}, Reward A: {total_reward_a:.2f}, Reward B: {total_reward_b:.2f}, Epsilon: {epsilon:.3f}")
     
