@@ -97,7 +97,20 @@ class TeamAgent(nn.Module):
         # Combine all player actions
         team_actions = torch.cat(player_actions, dim=1)
         return team_actions
-
+        
+class CriticNetwork(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super(CriticNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_dim + action_dim, 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, 1)
+    
+    def forward(self, state, action):
+        x = torch.cat([state, action], dim=1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        q_value = self.fc3(x)
+        return q_value
 
 class FootballSimulation:
     def __init__(self, num_players_per_team=5, use_rendering=False):
@@ -641,94 +654,134 @@ def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_S
     memory_a = ReplayMemory(MEMORY_SIZE)
     memory_b = ReplayMemory(MEMORY_SIZE)
 
-def select_action(policy_net, state, epsilon, device):
+def select_action(policy_net, state, noise_scale, device):
     policy_net.eval()
     with torch.no_grad():
         action = policy_net(state.to(device))
     policy_net.train()
-    
-    # Add noise for exploration
-    noise = torch.randn_like(action) * epsilon
-    action = action + noise
-    # Optionally clamp or normalize parts of action here
-    return action.clamp(-1, 1)  # or appropriate limits
 
-def soft_update(target_net, policy_net, tau):
-    for target_param, param in zip(target_net.parameters(), policy_net.parameters()):
+    noise = noise_scale * torch.randn_like(action)
+    action = action + noise
+    # Clamp actions to reasonable range, e.g. [-1, 1]
+    return action.clamp(-1, 1)
+
+def soft_update(target_net, source_net, tau):
+    for target_param, param in zip(target_net.parameters(), source_net.parameters()):
         target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
 
-
-epsilon = EPSILON_START
-epsilon_decay_step = (EPSILON_START - EPSILON_END) / EPSILON_DECAY
-
-for episode in range(num_episodes):
-    state = env.reset()
-    done = False
-    total_reward_a = 0
-    total_reward_b = 0
+def optimize_ddpg(policy_net, critic_net, target_policy_net, target_critic_net,
+                  optimizer_policy, optimizer_critic, memory, batch_size, device, gamma=GAMMA):
+    if len(memory) < batch_size:
+        return  # Not enough samples
     
-    for step in range(max_steps_per_episode):
-        # Select actions with exploration noise
-        action_a = select_action(policy_net_a, state, epsilon, device)
-        action_b = select_action(policy_net_b, state, epsilon, device)
-        
-        # Take a step in environment
-        next_state, (reward_a, reward_b), done, info = env.step(action_a, action_b)
-        
-        # Store transitions in replay memory
-        memory_a.push(state, action_a, reward_a, next_state, done)
-        memory_b.push(state, action_b, reward_b, next_state, done)
-        
-        state = next_state
-        total_reward_a += reward_a
-        total_reward_b += reward_b
-        
-        # Sample minibatch and optimize policy networks
-        if len(memory_a) >= batch_size:
-            optimize_model(policy_net_a, target_net_a, optimizer_a, memory_a, batch_size, device)
-        if len(memory_b) >= batch_size:
-            optimize_model(policy_net_b, target_net_b, optimizer_b, memory_b, batch_size, device)
-        
-        # Soft update target networks
-        soft_update(target_net_a, policy_net_a, TAU)
-        soft_update(target_net_b, policy_net_b, TAU)
-        
-        # Decay epsilon
-        epsilon = max(EPSILON_END, epsilon - epsilon_decay_step)
-        
-        if done:
-            break
-    
-    if (episode + 1) % render_every == 0:
-        env.use_rendering = True
-        env.render()
-        env.use_rendering = False
-    
-    print(f"Episode {episode+1}, Reward A: {total_reward_a:.2f}, Reward B: {total_reward_b:.2f}, Epsilon: {epsilon:.3f}")
-
-
-def optimize_model(policy_net, target_net, optimizer, memory, batch_size, device):
     experiences = memory.sample(batch_size)
     batch = Experience(*zip(*experiences))
     
-    states = torch.cat(batch.state).to(device)
-    actions = torch.cat(batch.action).to(device)
-    rewards = torch.tensor(batch.reward, dtype=torch.float32, device=device).unsqueeze(1)
-    next_states = torch.cat(batch.next_state).to(device)
-    dones = torch.tensor(batch.done, dtype=torch.float32, device=device).unsqueeze(1)
+    states = torch.cat(batch.state).to(device)            # shape [batch, state_dim]
+    actions = torch.cat(batch.action).to(device)          # shape [batch, action_dim]
+    rewards = torch.tensor(batch.reward, dtype=torch.float32, device=device).unsqueeze(1)  # [batch, 1]
+    next_states = torch.cat(batch.next_state).to(device)  # [batch, state_dim]
+    dones = torch.tensor(batch.done, dtype=torch.float32, device=device).unsqueeze(1)     # [batch, 1]
     
-    # Compute current Q values from policy net
-    pred_actions = policy_net(states)
-    
-    # Compute target Q values from target net
+    # Compute target Q values
     with torch.no_grad():
-        target_actions = target_net(next_states)
+        next_actions = target_policy_net(next_states)
+        target_q_values = target_critic_net(next_states, next_actions)
+        target_q = rewards + (1 - dones) * gamma * target_q_values
     
-    # Compute loss (e.g. MSE between predicted and target)
-    # Since this is a continuous action output, you may want to use e.g. DDPG or actor-critic method
-    # Here is a placeholder for a simple supervised loss:
-    loss = F.mse_loss(pred_actions, actions)
+    # Critic loss
+    current_q = critic_net(states, actions)
+    critic_loss = F.mse_loss(current_q, target_q)
     
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+    optimizer_critic.zero_grad()
+    critic_loss.backward()
+    optimizer_critic.step()
+    
+    # Actor loss (maximize Q by minimizing -Q)
+    pred_actions = policy_net(states)
+    actor_loss = -critic_net(states, pred_actions).mean()
+    
+    optimizer_policy.zero_grad()
+    actor_loss.backward()
+    optimizer_policy.step()
+
+def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_SIZE,
+                 num_players=5, render_every=50):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    env = FootballSimulation(num_players_per_team=num_players, use_rendering=False)
+    
+    state_dim = 4 + 4 * num_players * 2
+    action_dim_per_player = 6
+    total_action_dim = num_players * action_dim_per_player
+    
+    # Create actor and critic networks for both teams
+    policy_net_a = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
+    target_policy_net_a = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
+    target_policy_net_a.load_state_dict(policy_net_a.state_dict())
+    
+    critic_net_a = CriticNetwork(state_dim, total_action_dim).to(device)
+    target_critic_net_a = CriticNetwork(state_dim, total_action_dim).to(device)
+    target_critic_net_a.load_state_dict(critic_net_a.state_dict())
+    
+    policy_net_b = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
+    target_policy_net_b = TeamAgent(num_players, state_dim, action_dim_per_player).to(device)
+    target_policy_net_b.load_state_dict(policy_net_b.state_dict())
+    
+    critic_net_b = CriticNetwork(state_dim, total_action_dim).to(device)
+    target_critic_net_b = CriticNetwork(state_dim, total_action_dim).to(device)
+    target_critic_net_b.load_state_dict(critic_net_b.state_dict())
+    
+    optimizer_policy_a = optim.Adam(policy_net_a.parameters(), lr=LR)
+    optimizer_critic_a = optim.Adam(critic_net_a.parameters(), lr=LR)
+    
+    optimizer_policy_b = optim.Adam(policy_net_b.parameters(), lr=LR)
+    optimizer_critic_b = optim.Adam(critic_net_b.parameters(), lr=LR)
+    
+    memory_a = ReplayMemory(MEMORY_SIZE)
+    memory_b = ReplayMemory(MEMORY_SIZE)
+    
+    epsilon = EPSILON_START
+    epsilon_decay_step = (EPSILON_START - EPSILON_END) / EPSILON_DECAY
+    
+    for episode in range(num_episodes):
+        state = env.reset()
+        done = False
+        total_reward_a = 0
+        total_reward_b = 0
+        
+        for step in range(max_steps_per_episode):
+            action_a = select_action(policy_net_a, state, epsilon, device)
+            action_b = select_action(policy_net_b, state, epsilon, device)
+            
+            next_state, (reward_a, reward_b), done, info = env.step(action_a, action_b)
+            
+            memory_a.push(state, action_a, reward_a, next_state, done)
+            memory_b.push(state, action_b, reward_b, next_state, done)
+            
+            state = next_state
+            total_reward_a += reward_a
+            total_reward_b += reward_b
+            
+            optimize_ddpg(policy_net_a, critic_net_a, target_policy_net_a, target_critic_net_a,
+                          optimizer_policy_a, optimizer_critic_a, memory_a, batch_size, device)
+            
+            optimize_ddpg(policy_net_b, critic_net_b, target_policy_net_b, target_critic_net_b,
+                          optimizer_policy_b, optimizer_critic_b, memory_b, batch_size, device)
+            
+            soft_update(target_policy_net_a, policy_net_a, TAU)
+            soft_update(target_critic_net_a, critic_net_a, TAU)
+            soft_update(target_policy_net_b, policy_net_b, TAU)
+            soft_update(target_critic_net_b, critic_net_b, TAU)
+            
+            epsilon = max(EPSILON_END, epsilon - epsilon_decay_step)
+            
+            if done:
+                break
+        
+        if (episode + 1) % render_every == 0:
+            env.use_rendering = True
+            env.render()
+            env.use_rendering = False
+        
+        print(f"Episode {episode+1}, Reward A: {total_reward_a:.2f}, Reward B: {total_reward_b:.2f}, Epsilon: {epsilon:.3f}")
