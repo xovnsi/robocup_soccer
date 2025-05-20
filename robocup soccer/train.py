@@ -778,6 +778,12 @@ def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_S
             
             if done:
                 break
+
+        if (episode + 1) % 50 == 0:
+            torch.save(policy_net_a.state_dict(), 'policy_net_a.pth')
+            torch.save(policy_net_b.state_dict(), 'policy_net_b.pth')
+            print(f"Saved models at episode {episode + 1}")
+    
         
         if (episode + 1) % render_every == 0:
             env.use_rendering = True
