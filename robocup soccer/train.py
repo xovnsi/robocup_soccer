@@ -785,3 +785,6 @@ def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_S
             env.use_rendering = False
         
         print(f"Episode {episode+1}, Reward A: {total_reward_a:.2f}, Reward B: {total_reward_b:.2f}, Epsilon: {epsilon:.3f}")
+    
+if __name__ == "__main__":
+    train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_SIZE, num_players=5, render_every=50)
