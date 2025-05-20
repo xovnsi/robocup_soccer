@@ -635,4 +635,100 @@ def train_agents(num_episodes=500, max_steps_per_episode=600, batch_size=BATCH_S
     target_net_b.load_state_dict(policy_net_b.state_dict())
     
     # Setup optimizers
-    optimizer_a = optim.Adam(policy_net_a.
+    optimizer_a = optim.Adam(policy_net_a.parameters(), lr=LR)
+    optimizer_b = optim.Adam(policy_net_b.parameters(), lr=LR)
+    
+    memory_a = ReplayMemory(MEMORY_SIZE)
+    memory_b = ReplayMemory(MEMORY_SIZE)
+
+def select_action(policy_net, state, epsilon, device):
+    policy_net.eval()
+    with torch.no_grad():
+        action = policy_net(state.to(device))
+    policy_net.train()
+    
+    # Add noise for exploration
+    noise = torch.randn_like(action) * epsilon
+    action = action + noise
+    # Optionally clamp or normalize parts of action here
+    return action.clamp(-1, 1)  # or appropriate limits
+
+def soft_update(target_net, policy_net, tau):
+    for target_param, param in zip(target_net.parameters(), policy_net.parameters()):
+        target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
+
+
+epsilon = EPSILON_START
+epsilon_decay_step = (EPSILON_START - EPSILON_END) / EPSILON_DECAY
+
+for episode in range(num_episodes):
+    state = env.reset()
+    done = False
+    total_reward_a = 0
+    total_reward_b = 0
+    
+    for step in range(max_steps_per_episode):
+        # Select actions with exploration noise
+        action_a = select_action(policy_net_a, state, epsilon, device)
+        action_b = select_action(policy_net_b, state, epsilon, device)
+        
+        # Take a step in environment
+        next_state, (reward_a, reward_b), done, info = env.step(action_a, action_b)
+        
+        # Store transitions in replay memory
+        memory_a.push(state, action_a, reward_a, next_state, done)
+        memory_b.push(state, action_b, reward_b, next_state, done)
+        
+        state = next_state
+        total_reward_a += reward_a
+        total_reward_b += reward_b
+        
+        # Sample minibatch and optimize policy networks
+        if len(memory_a) >= batch_size:
+            optimize_model(policy_net_a, target_net_a, optimizer_a, memory_a, batch_size, device)
+        if len(memory_b) >= batch_size:
+            optimize_model(policy_net_b, target_net_b, optimizer_b, memory_b, batch_size, device)
+        
+        # Soft update target networks
+        soft_update(target_net_a, policy_net_a, TAU)
+        soft_update(target_net_b, policy_net_b, TAU)
+        
+        # Decay epsilon
+        epsilon = max(EPSILON_END, epsilon - epsilon_decay_step)
+        
+        if done:
+            break
+    
+    if (episode + 1) % render_every == 0:
+        env.use_rendering = True
+        env.render()
+        env.use_rendering = False
+    
+    print(f"Episode {episode+1}, Reward A: {total_reward_a:.2f}, Reward B: {total_reward_b:.2f}, Epsilon: {epsilon:.3f}")
+
+
+def optimize_model(policy_net, target_net, optimizer, memory, batch_size, device):
+    experiences = memory.sample(batch_size)
+    batch = Experience(*zip(*experiences))
+    
+    states = torch.cat(batch.state).to(device)
+    actions = torch.cat(batch.action).to(device)
+    rewards = torch.tensor(batch.reward, dtype=torch.float32, device=device).unsqueeze(1)
+    next_states = torch.cat(batch.next_state).to(device)
+    dones = torch.tensor(batch.done, dtype=torch.float32, device=device).unsqueeze(1)
+    
+    # Compute current Q values from policy net
+    pred_actions = policy_net(states)
+    
+    # Compute target Q values from target net
+    with torch.no_grad():
+        target_actions = target_net(next_states)
+    
+    # Compute loss (e.g. MSE between predicted and target)
+    # Since this is a continuous action output, you may want to use e.g. DDPG or actor-critic method
+    # Here is a placeholder for a simple supervised loss:
+    loss = F.mse_loss(pred_actions, actions)
+    
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
